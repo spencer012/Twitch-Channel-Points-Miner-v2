@@ -1,0 +1,19 @@
+services:
+  miner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    stdin_open: true
+    tty: true
+    environment:
+      - TERM=xterm-256color
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./docker/analytics:/usr/src/app/analytics
+      - ./docker/cookies:/usr/src/app/cookies
+      - ./docker/logs:/usr/src/app/logs
+      - ./docker/run.py:/usr/src/app/run.py:ro
+      - .:/usr/src/app/
+    ports:
+      - "5011:5000"
+    restart: always

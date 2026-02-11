@@ -75,15 +75,34 @@ def filter_datas(start_date, end_date, datas):
         new_end_date = start_date
         new_start_date = 0
         df = pd.DataFrame(original_series)
-        df["datetime"] = pd.to_datetime(df.x // 1000, unit="s")
+        
+        # Handle empty original_series
+        if df.empty:
+            datas["series"] = [{'x': start_date, 'y': 0, 'z': 'No Data'}, {
+                'x': end_date, 'y': 0, 'z': 'No Data'}]
+        else:
+            df["datetime"] = pd.to_datetime(df.x // 1000, unit="s")
 
-        # Attempt to get the last known balance from before the provided timeframe
-        df = df[(df.x >= new_start_date) & (df.x <= new_end_date)]
-        last_balance = df.drop(columns="datetime").sort_values(
-            by=["x", "y"], ascending=True).to_dict("records")[-1]['y']
-
-        datas["series"] = [{'x': start_date, 'y': last_balance, 'z': 'No Stream'}, {
-            'x': end_date, 'y': last_balance, 'z': 'No Stream'}]
+            # Attempt to get the last known balance from before the provided timeframe
+            df = df[(df.x >= new_start_date) & (df.x <= new_end_date)]
+            records = df.drop(columns="datetime").sort_values(
+                by=["x", "y"], ascending=True).to_dict("records")
+            
+            if records:
+                last_balance = records[-1]['y']
+                datas["series"] = [{'x': start_date, 'y': last_balance, 'z': 'No Stream'}, {
+                    'x': end_date, 'y': last_balance, 'z': 'No Stream'}]
+            else:
+                # No historical data before the timeframe either, use the first available data point
+                df_all = pd.DataFrame(original_series)
+                if not df_all.empty:
+                    # Convert to native Python int to ensure JSON serializable
+                    first_balance = int(df_all.sort_values(by=["x"], ascending=True).iloc[0]['y'])
+                    datas["series"] = [{'x': start_date, 'y': first_balance, 'z': 'No Stream'}, {
+                        'x': end_date, 'y': first_balance, 'z': 'No Stream'}]
+                else:
+                    datas["series"] = [{'x': start_date, 'y': 0, 'z': 'No Data'}, {
+                        'x': end_date, 'y': 0, 'z': 'No Data'}]
 
     if "annotations" in datas:
         df = pd.DataFrame(datas["annotations"])
