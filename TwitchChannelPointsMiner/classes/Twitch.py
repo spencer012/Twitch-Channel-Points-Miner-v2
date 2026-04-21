@@ -1328,21 +1328,22 @@ class Twitch(object):
 
     def post_gql_request(self, json_data):
         operation_name = self._operation_name_from_json_data(json_data)
+        headers = {
+            "Authorization": f"OAuth {self.twitch_login.get_auth_token()}",
+            "Client-Id": CLIENT_ID,
+            # "Client-Integrity": self.post_integrity(),
+            "Client-Session-Id": self.client_session,
+            "Client-Version": self.update_client_version(),
+            "User-Agent": self.user_agent,
+            "X-Device-Id": self.device_id,
+        }
         try:
             response = self._request_with_retry(
                 "POST",
                 GQLOperations.url,
                 request_name=f"post_gql_request:{operation_name}",
                 json=json_data,
-                headers={
-                    "Authorization": f"OAuth {self.twitch_login.get_auth_token()}",
-                    "Client-Id": CLIENT_ID,
-                    # "Client-Integrity": self.post_integrity(),
-                    "Client-Session-Id": self.client_session,
-                    "Client-Version": self.update_client_version(),
-                    "User-Agent": self.user_agent,
-                    "X-Device-Id": self.device_id,
-                },
+                headers=headers,
                 timeout=20,
             )
             logger.debug(
@@ -1385,6 +1386,62 @@ class Twitch(object):
                         response.status_code,
                     )
                 return {}
+            is_apq_miss = (
+                isinstance(json_response, dict)
+                and any(
+                    err.get("message") == "PersistedQueryNotFound"
+                    for err in json_response.get("errors", [])
+                    if isinstance(err, dict)
+                )
+            )
+            should_retry_with_full_query = (
+                is_apq_miss
+                and json_data.get("operationName") == "PlaybackAccessToken"
+                and "query" not in json_data
+            )
+
+            if should_retry_with_full_query:
+                retry_payload = copy.deepcopy(json_data)
+                retry_payload["query"] = GQLOperations.PlaybackAccessTokenQuery
+
+                retry_response = self._request_with_retry(
+                    "POST",
+                    GQLOperations.url,
+                    request_name=f"post_gql_request_apq_retry:{operation_name}",
+                    json=retry_payload,
+                    headers=headers,
+                    timeout=20,
+                )
+                logger.debug(
+                    "Retrying PlaybackAccessToken with inline GraphQL query due to PersistedQueryNotFound. "
+                    f"Data: {retry_payload}, Status code: {retry_response.status_code}, Content: {retry_response.text}"
+                )
+                try:
+                    return retry_response.json()
+                except ValueError:
+                    key = (
+                        "gql_invalid_json_retry",
+                        operation_name,
+                        retry_response.status_code,
+                    )
+                    now = time.time()
+                    last_logged = self._last_gql_error_log.get(key, 0)
+                    if now - last_logged >= GQL_REQUEST_WARNING_TTL:
+                        logger.warning(
+                            "Invalid JSON response for APQ retry %s (status %s)",
+                            operation_name,
+                            retry_response.status_code,
+                        )
+                        self._last_gql_error_log[key] = now
+                    else:
+                        logger.debug(
+                            "Invalid JSON response for APQ retry %s (status %s) (suppressed)",
+                            operation_name,
+                            retry_response.status_code,
+                        )
+                    return {}
+
+            return json_response
         except requests.exceptions.RequestException as e:
             self._log_request_exception(operation_name, str(e))
             return {}
@@ -2300,6 +2357,23 @@ class Twitch(object):
             }
         except (TypeError, KeyError):
             return {"channelLogin": channel_login, "error": "invalid_response"}
+
+    def get_channel_points_balance(self, channel_login):
+        rewards_context = self.get_channel_rewards_context(channel_login)
+        if rewards_context.get("error") is not None:
+            return {
+                "channelLogin": channel_login,
+                "error": rewards_context["error"],
+            }
+
+        return {
+            "channelLogin": channel_login,
+            "channelId": rewards_context.get("channelId", ""),
+            "communityId": rewards_context.get("communityId", ""),
+            "balance": rewards_context.get("balance", 0),
+            "availableClaim": rewards_context.get("availableClaim"),
+            "activeMultipliers": rewards_context.get("activeMultipliers", []),
+        }
 
     def redeem_custom_reward(self, channel_id, reward_payload, transaction_id=None):
         json_data = copy.deepcopy(GQLOperations.RedeemCustomReward)

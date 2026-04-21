@@ -28,7 +28,7 @@ It is written so another agent can implement client integration without reading 
 
 1. Client opens websocket.
 2. Server emits a `connected` message.
-3. Client sends control actions (`subscribe`, `unsubscribe`, `replace_subscriptions`, `get_rewards`, `redeem`).
+3. Client sends control actions (`subscribe`, `unsubscribe`, `replace_subscriptions`, `get_channel_points`, `get_rewards`, `redeem`).
 4. Server sends action result messages and event messages.
 5. On disconnect, all subscriptions owned by that socket are removed automatically.
 
@@ -41,6 +41,7 @@ The server hosts a built-in single-streamer test UI on the same port:
 - It supports:
   - connect/disconnect,
   - subscribe/unsubscribe for one streamer login,
+  - `get_channel_points` current balance fetch,
   - `get_rewards` snapshot fetch,
   - `redeem` calls,
   - live event/response log display.
@@ -204,6 +205,40 @@ Response:
 }
 ```
 
+## `get_channel_points`
+
+Fetch the current channel points balance for a channel.
+
+Request:
+
+```json
+{
+  "action": "get_channel_points",
+  "requestId": "req-4a",
+  "channelLogin": "aquwa"
+}
+```
+
+Response:
+
+```json
+{
+  "type": "channel_points_snapshot",
+  "requestId": "req-4a",
+  "channelLogin": "aquwa",
+  "channelId": "996756981",
+  "points": {
+    "channelLogin": "aquwa",
+    "channelId": "996756981",
+    "communityId": "996756981",
+    "balance": 41682,
+    "availableClaim": null,
+    "activeMultipliers": []
+  },
+  "timestamp": "2026-03-19T12:00:00.000000+00:00"
+}
+```
+
 ## `redeem`
 
 Redeem a custom reward through Twitch GraphQL `RedeemCustomReward`.
@@ -318,9 +353,10 @@ Subscribed or Connected
 3. Connect websocket from UI.
 4. Enter streamer login and click `Subscribe`.
 5. Click `Get Rewards` and confirm `rewards_snapshot` plus populated rewards table.
-6. Pick a reward row (or enter reward fields manually), then click `Redeem`.
-7. Confirm `redeem_result` and observe event log (`reward_redeemed`, `reward_updated`, `points_spent`, or `error`).
-8. Click `Unsubscribe` or disconnect; server drops this socket's subscriptions automatically.
+6. Click `Get Channel Points` and confirm `channel_points_snapshot`.
+7. Pick a reward row (or enter reward fields manually), then click `Redeem`.
+8. Confirm `redeem_result` and observe event log (`reward_redeemed`, `reward_updated`, `points_spent`, or `error`).
+9. Click `Unsubscribe` or disconnect; server drops this socket's subscriptions automatically.
 
 ## UI-Driven Action Sequence
 
@@ -328,9 +364,10 @@ The expected request/response sequence from the test page:
 
 1. `connected` (server -> client after open)
 2. `subscribe` -> `subscribed`
-3. `get_rewards` -> `rewards_snapshot`
-4. `redeem` -> `redeem_result`
-5. asynchronous `event` messages as Twitch PubSub updates arrive
+3. `get_channel_points` -> `channel_points_snapshot`
+4. `get_rewards` -> `rewards_snapshot`
+5. `redeem` -> `redeem_result`
+6. asynchronous `event` messages as Twitch PubSub updates arrive
 
 ## Security Notes
 

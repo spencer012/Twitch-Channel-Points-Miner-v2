@@ -5,6 +5,7 @@ import threading
 from datetime import datetime, timezone
 
 from websockets.legacy.server import serve as ws_serve
+from websockets.exceptions import ConnectionClosed
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,9 @@ def _build_test_page_html(ws_path):
         <button id="subscribeBtn">Subscribe</button>
         <button id="unsubscribeBtn">Unsubscribe</button>
         <button id="getRewardsBtn">Get Rewards</button>
+      </div>
+      <div class="inline">
+        <button id="getPointsBtn">Get Channel Points</button>
       </div>
     </div>
 
@@ -285,6 +289,14 @@ def _build_test_page_html(ws_path):
         }}
       }}
 
+      function renderPointsSnapshot(points) {{
+        const login = points.channelLogin || state.currentChannelLogin || "";
+        const channelId = points.channelId || state.currentChannelId || "";
+        const balance = points.balance ?? 0;
+        const claim = points.availableClaim ? "available" : "none";
+        snapshotMeta.textContent = `Channel: ${{login}} (${{channelId}}) | Points: ${{balance}} | Claim: ${{claim}}`;
+      }}
+
       function onMessage(evt) {{
         let msg = null;
         try {{
@@ -306,6 +318,12 @@ def _build_test_page_html(ws_path):
           state.currentChannelId = msg.channelId || state.currentChannelId;
           snapshotMeta.textContent = `Channel: ${{state.currentChannelLogin}} (${{state.currentChannelId}})`;
           renderRewards(msg.rewards);
+        }}
+
+        if (msg.type === "channel_points_snapshot" && msg.points) {{
+          state.currentChannelLogin = msg.channelLogin || state.currentChannelLogin;
+          state.currentChannelId = msg.channelId || state.currentChannelId;
+          renderPointsSnapshot(msg.points);
         }}
 
         if (msg.type === "redeem_result" && msg.result && msg.result.ok === false) {{
@@ -372,6 +390,16 @@ def _build_test_page_html(ws_path):
         send({{
           action: "get_rewards",
           requestId: mkRequestId("get-rewards"),
+          channelLogin: login
+        }});
+      }};
+
+      document.getElementById("getPointsBtn").onclick = () => {{
+        const login = requireLogin();
+        if (!login) return;
+        send({{
+          action: "get_channel_points",
+          requestId: mkRequestId("get-points"),
           channelLogin: login
         }});
       }};
@@ -526,7 +554,12 @@ class ChannelPointsServer(threading.Thread):
             await self._cleanup_client(ws)
 
     async def _send(self, ws, payload):
-        await ws.send(json.dumps(payload))
+        try:
+            await ws.send(json.dumps(payload))
+            return True
+        except ConnectionClosed:
+            logger.debug("Skipping send because websocket is already closed")
+            return False
 
     async def _send_error(self, ws, request_id, code, message):
         await self._send(
@@ -847,6 +880,39 @@ class ChannelPointsServer(threading.Thread):
         }
         await self._send(ws, message)
 
+    async def _handle_get_channel_points(self, ws, payload):
+        request_id = payload.get("requestId")
+        channel_login = _normalize_login(payload.get("channelLogin"))
+        if not channel_login:
+            await self._send_error(ws, request_id, "invalid_payload", "channelLogin is required")
+            return
+
+        loop = asyncio.get_running_loop()
+        try:
+            points = await loop.run_in_executor(
+                None, self.twitch.get_channel_points_balance, channel_login
+            )
+        except Exception:
+            await self._send_error(
+                ws,
+                request_id,
+                "points_lookup_failed",
+                "Unable to fetch channel points for channel",
+            )
+            return
+
+        await self._send(
+            ws,
+            {
+                "type": "channel_points_snapshot",
+                "requestId": request_id,
+                "channelLogin": channel_login,
+                "channelId": str(points.get("channelId", "")),
+                "points": points,
+                "timestamp": _utc_now(),
+            },
+        )
+
     async def _handle_message(self, ws, raw_message):
         try:
             payload = json.loads(raw_message)
@@ -867,6 +933,8 @@ class ChannelPointsServer(threading.Thread):
             await self._handle_replace_subscriptions(ws, payload)
         elif action == "get_rewards":
             await self._handle_get_rewards(ws, payload)
+        elif action == "get_channel_points":
+            await self._handle_get_channel_points(ws, payload)
         elif action == "redeem":
             await self._handle_redeem(ws, payload)
         else:
@@ -896,6 +964,7 @@ class ChannelPointsServer(threading.Thread):
                     "unsubscribe",
                     "replace_subscriptions",
                     "get_rewards",
+                    "get_channel_points",
                     "redeem",
                 ],
             },

@@ -60,6 +60,40 @@ class GQLOperations:
             }
         },
     }
+    PlaybackAccessTokenQuery = """
+query PlaybackAccessToken(
+  $isLive: Boolean!,
+  $login: String!,
+  $isVod: Boolean!,
+  $vodID: ID!,
+  $playerType: String!
+) {
+  streamPlaybackAccessToken(
+    channelName: $login
+    params: {
+      platform: "web"
+      playerBackend: "mediaplayer"
+      playerType: $playerType
+    }
+  ) @include(if: $isLive) {
+    value
+    signature
+    __typename
+  }
+  videoPlaybackAccessToken(
+    id: $vodID
+    params: {
+      platform: "web"
+      playerBackend: "mediaplayer"
+      playerType: $playerType
+    }
+  ) @include(if: $isVod) {
+    value
+    signature
+    __typename
+  }
+}
+""".strip()
     VideoPlayerStreamInfoOverlayChannel = {
         "operationName": "VideoPlayerStreamInfoOverlayChannel",
         "extensions": {
