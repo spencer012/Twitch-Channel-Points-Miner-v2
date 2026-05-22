@@ -13,6 +13,7 @@ from TwitchChannelPointsMiner.classes.entities.Raid import Raid
 from TwitchChannelPointsMiner.utils import get_streamer_index
 
 logger = logging.getLogger(__name__)
+ONLINE_DETECTION_DELAYS = (10, 20, 40)
 
 
 class MessageListener(abc.ABC):
@@ -32,6 +33,45 @@ class PubSubHandler(MessageListener):
         self.twitch = twitch
         self.streamers = streamers
         self.events_predictions = events_predictions
+        self.online_detection_timers = {}
+
+    def _schedule_online_detection(self, streamer):
+        if streamer.is_online is True:
+            return
+
+        for timer in self.online_detection_timers.pop(streamer.username, []):
+            timer.cancel()
+
+        timers = []
+        for delay in ONLINE_DETECTION_DELAYS:
+            timer = Timer(
+                delay,
+                self._run_online_detection_check,
+                args=(streamer, delay),
+            )
+            timer.daemon = True
+            timer.start()
+            timers.append(timer)
+
+        self.online_detection_timers[streamer.username] = timers
+
+    def _run_online_detection_check(self, streamer, delay):
+        if self.twitch.running is False or streamer.is_online is True:
+            if streamer.is_online is True:
+                for timer in self.online_detection_timers.pop(streamer.username, []):
+                    timer.cancel()
+            return
+
+        try:
+            self.twitch.check_streamer_online(streamer, force=True)
+        except Exception:
+            logger.debug(
+                "Failed delayed online check for %s", streamer.username, exc_info=True
+            )
+        finally:
+            if streamer.is_online is True or delay == ONLINE_DETECTION_DELAYS[-1]:
+                for timer in self.online_detection_timers.pop(streamer.username, []):
+                    timer.cancel()
 
     def on_message(self, message: Message):
         streamer_index = get_streamer_index(self.streamers, message.channel_id)
@@ -75,13 +115,15 @@ class PubSubHandler(MessageListener):
             elif message.topic == "video-playback-by-id":
                 if message.type == "stream-up":
                     self.streamers[streamer_index].stream_up = time.time()
+                    self._schedule_online_detection(self.streamers[streamer_index])
                 elif message.type == "stream-down":
                     if self.streamers[streamer_index].is_online is True:
                         self.streamers[streamer_index].set_offline()
                 elif message.type == "viewcount":
                     if self.streamers[streamer_index].stream_up_elapsed():
                         self.twitch.check_streamer_online(
-                            self.streamers[streamer_index]
+                            self.streamers[streamer_index],
+                            force=True,
                         )
 
             elif message.topic == "raid":

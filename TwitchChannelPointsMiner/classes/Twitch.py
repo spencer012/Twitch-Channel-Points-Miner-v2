@@ -197,11 +197,11 @@ class Twitch(object):
             self.twitch_login.set_token(self.twitch_login.get_auth_token())
 
     # === STREAMER / STREAM / INFO === #
-    def update_stream(self, streamer):
-        if streamer.stream.update_required() is False:
+    def update_stream(self, streamer, force=False):
+        if force is False and streamer.stream.update_required() is False:
             return True
 
-        stream_info = self.get_stream_info(streamer)
+        stream_info = self.get_stream_info(streamer, force=force)
         if stream_info is None:
             return False
 
@@ -355,10 +355,12 @@ class Twitch(object):
             return stream.get("id")
         raise StreamerIsOfflineException
 
-    def get_stream_info(self, streamer):
+    def get_stream_info(self, streamer, force=False):
         cache_key = streamer.username
         now = time.time()
-        cached_entry = self._get_cached_stream_info(cache_key, now)
+        cached_entry = (
+            None if force is True else self._get_cached_stream_info(cache_key, now)
+        )
         if cached_entry:
             return cached_entry
 
@@ -452,14 +454,14 @@ class Twitch(object):
         }
         return stream_info
 
-    def check_streamer_online(self, streamer):
-        if time.time() < streamer.offline_at + 60:
+    def check_streamer_online(self, streamer, force=False):
+        if force is False and time.time() < streamer.offline_at + 60:
             return
 
         if streamer.is_online is False:
             try:
                 self.get_spade_url(streamer)
-                updated = self.update_stream(streamer)
+                updated = self.update_stream(streamer, force=force)
             except StreamerIsOfflineException:
                 streamer.set_offline()
             else:
@@ -467,7 +469,7 @@ class Twitch(object):
                     streamer.set_online()
         else:
             try:
-                updated = self.update_stream(streamer)
+                updated = self.update_stream(streamer, force=force)
             except StreamerIsOfflineException:
                 streamer.set_offline()
             else:

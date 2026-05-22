@@ -319,7 +319,7 @@ class Streamer(object):
             self.stream.watch_streak_missing = False
 
     def stream_up_elapsed(self):
-        return self.stream_up == 0 or ((time.time() - self.stream_up) > 120)
+        return self.stream_up == 0 or ((time.time() - self.stream_up) > 30)
 
     def drops_condition(self):
         return (
