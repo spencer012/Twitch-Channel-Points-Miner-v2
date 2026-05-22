@@ -257,6 +257,7 @@ twitch_miner = TwitchChannelPointsMiner(
 # 3. Default settings
 
 # twitch_miner.analytics(host="127.0.0.1", port=5000, refresh=5, days_ago=7)
+# twitch_miner.channel_points(host="127.0.0.1", port=8765, path="/channel-points/ws")
 
 twitch_miner.mine(
     STREAMERS,

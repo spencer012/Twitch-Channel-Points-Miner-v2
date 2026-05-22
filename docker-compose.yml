@@ -16,4 +16,5 @@ services:
       - .:/usr/src/app/
     ports:
       - "5011:5000"
+      - "8765:8765"
     restart: always

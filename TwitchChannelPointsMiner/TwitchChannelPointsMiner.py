@@ -99,6 +99,7 @@ class TwitchChannelPointsMiner:
         "minute_watcher_thread",
         "sync_campaigns_thread",
         "ws_pool",
+        "channel_points_server",
         "session_id",
         "running",
         "start_datetime",
@@ -281,6 +282,7 @@ class TwitchChannelPointsMiner:
         self.minute_watcher_thread = None
         self.sync_campaigns_thread = None
         self.ws_pool = None
+        self.channel_points_server = None
 
         self.session_id = str(uuid.uuid4())
         self.running = False
@@ -1053,6 +1055,32 @@ class TwitchChannelPointsMiner:
             listeners=listeners,
         )
 
+    def channel_points(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        path: str = "/channel-points/ws",
+    ):
+        from TwitchChannelPointsMiner.classes.ChannelPointsServer import ChannelPointsServer
+
+        if self.channel_points_server is not None and self.channel_points_server.is_alive():
+            logger.warning(
+                "Channel points server is already running",
+                extra={"emoji": ":warning:"},
+            )
+            return
+
+        self.channel_points_server = ChannelPointsServer(
+            twitch=self.twitch,
+            ws_pool_getter=lambda: self.ws_pool,
+            host=host,
+            port=port,
+            path=path,
+        )
+        self.channel_points_server.daemon = True
+        self.channel_points_server.name = "Channel Points Thread"
+        self.channel_points_server.start()
+
     def mine(
         self,
         streamers: list[Streamer | str] | None = None,
@@ -1276,6 +1304,9 @@ class TwitchChannelPointsMiner:
             self.ws_pool = self._create_ws_pool()
             self.ws_pool.start()
 
+            if self.channel_points_server is not None:
+                self.channel_points_server.bind_ws_pool(self.ws_pool)
+
             # Subscribe to community-points-user. Get update for points spent or gains
             user_id = self.twitch.twitch_login.get_user_id()
             # print(f"!!!!!!!!!!!!!! USER_ID: {user_id}")
@@ -1366,6 +1397,8 @@ class TwitchChannelPointsMiner:
         self.running = self.twitch.running = False
         if self.ws_pool is not None:
             self.ws_pool.end()
+        if self.channel_points_server is not None:
+            self.channel_points_server.end()
 
         if self.minute_watcher_thread is not None:
             self.minute_watcher_thread.join()

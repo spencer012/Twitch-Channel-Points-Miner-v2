@@ -115,5 +115,7 @@ urllib3==2.6.3
     # via requests
 websocket-client==1.9.0
     # via twitch-channel-points-miner-v2
+websockets==16.0
+    # via twitch-channel-points-miner-v2
 werkzeug==3.1.6
     # via flask

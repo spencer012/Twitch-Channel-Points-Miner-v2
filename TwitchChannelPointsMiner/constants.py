@@ -98,6 +98,7 @@ class GQLOperations:
     }
     ChannelPointsContext = {
         "operationName": "ChannelPointsContext",
+        "variables": {"includeGoalTypes": ["CREATOR", "BOOST"]},
         "extensions": {
             "persistedQuery": {
                 "version": 1,
@@ -250,4 +251,32 @@ class GQLOperations:
                 "sha256Hash": "5774f0ea5d89587d73021a2e03c3c44777d903840c608754a1be519f51e37bb6"
             }
         }
+    }
+    CommunityPointsRewardRedemptionContext = {
+        "operationName": "CommunityPointsRewardRedemptionContext",
+        "extensions": {
+            "persistedQuery": {
+                "version": 1,
+                "sha256Hash": "f585e0d07bee16fa1355238b1762c095cc10470edc263d38c4e3a1b8a7e53f65",
+            }
+        },
+    }
+    ChannelPointsGlobalContext = {
+        "operationName": "ChannelPointsGlobalContext",
+        "variables": {},
+        "extensions": {
+            "persistedQuery": {
+                "version": 1,
+                "sha256Hash": "d3fa3a96e78a3e62bdd3ef3c4effafeda52442906cec41a9440e609a388679e2",
+            }
+        },
+    }
+    RedeemCustomReward = {
+        "operationName": "RedeemCustomReward",
+        "extensions": {
+            "persistedQuery": {
+                "version": 1,
+                "sha256Hash": "d56249a7adb4978898ea3412e196688d4ac3cea1c0c2dfd65561d229ea5dcc42",
+            }
+        },
     }

@@ -6,6 +6,7 @@ from threading import Thread
 
 from TwitchChannelPointsMiner.classes.Settings import Settings
 from TwitchChannelPointsMiner.classes.entities.Message import Message
+from TwitchChannelPointsMiner.classes.entities.PubsubTopic import PubsubTopic
 from TwitchChannelPointsMiner.classes.websocket.Pool import WebSocketPool
 from TwitchChannelPointsMiner.classes.websocket.pubsub.Client import PubSubWebSocket
 from TwitchChannelPointsMiner.constants import WEBSOCKET
@@ -14,14 +15,22 @@ from TwitchChannelPointsMiner.utils import internet_connection_available
 logger = logging.getLogger(__name__)
 
 
+class _ChannelTopicRef:
+    __slots__ = ["channel_id"]
+
+    def __init__(self, channel_id):
+        self.channel_id = str(channel_id)
+
+
 class PubSubWebSocketPool(WebSocketPool):
-    __slots__ = ["forced_close", "listeners", "twitch", "ws"]
+    __slots__ = ["channel_points_dispatcher", "forced_close", "listeners", "twitch", "ws"]
 
     def __init__(self, twitch, listeners):
         self.ws = []
         self.twitch = twitch
         self.listeners = [listener for listener in listeners]
         self.forced_close = False
+        self.channel_points_dispatcher = None
 
     def start(self):
         logger.debug("Starting PubSub WebSocket Pool")
@@ -35,7 +44,7 @@ class PubSubWebSocketPool(WebSocketPool):
 
     def __submit(self, index, topic):
         try:
-            str(topic)
+            topic_key = str(topic)
         except Exception as exc:
             logger.warning(
                 "Skipping invalid PubSub topic '%s' (%s)",
@@ -44,13 +53,48 @@ class PubSubWebSocketPool(WebSocketPool):
             )
             return
 
-        if topic not in self.ws[index].topics:
+        if topic_key not in [str(t) for t in self.ws[index].topics]:
             self.ws[index].topics.append(topic)
 
         if self.ws[index].is_opened is False:
-            self.ws[index].pending_topics.append(topic)
+            if topic_key not in [str(t) for t in self.ws[index].pending_topics]:
+                self.ws[index].pending_topics.append(topic)
         else:
             self.ws[index].listen(topic, self.twitch.twitch_login.get_auth_token())
+
+    def unsubscribe(self, topic):
+        topic_key = str(topic)
+        for ws in self.ws:
+            in_topics = [str(t) for t in ws.topics]
+            if topic_key not in in_topics:
+                continue
+
+            topic_obj = ws.topics[in_topics.index(topic_key)]
+            ws.topics = [t for t in ws.topics if str(t) != topic_key]
+            ws.pending_topics = [t for t in ws.pending_topics if str(t) != topic_key]
+
+            if ws.is_opened:
+                ws.unlisten(topic_obj, self.twitch.twitch_login.get_auth_token())
+            break
+
+    def subscribe_channel_points_channel(self, channel_id):
+        topic = PubsubTopic(
+            "community-points-channel-v1",
+            streamer=_ChannelTopicRef(channel_id),
+        )
+        self.submit(topic)
+        return str(topic)
+
+    def unsubscribe_channel_points_channel(self, channel_id):
+        topic = PubsubTopic(
+            "community-points-channel-v1",
+            streamer=_ChannelTopicRef(channel_id),
+        )
+        self.unsubscribe(topic)
+        return str(topic)
+
+    def set_channel_points_dispatcher(self, dispatcher):
+        self.channel_points_dispatcher = dispatcher
 
     def __new(self, index):
         return PubSubWebSocket(
@@ -220,6 +264,32 @@ class PubSubWebSocketPool(WebSocketPool):
 
             ws.last_message_timestamp = parsed_message.timestamp
             ws.last_message_type_channel = parsed_message.identifier
+
+            if ws.parent_pool.channel_points_dispatcher is not None:
+                event_name = {
+                    "reward-redeemed": "reward_redeemed",
+                    "custom-reward-updated": "reward_updated",
+                    "points-spent": "points_spent",
+                }.get(parsed_message.type)
+
+                if event_name is not None:
+                    try:
+                        ws.parent_pool.channel_points_dispatcher(
+                            event_name,
+                            {
+                                "channel_id": parsed_message.channel_id,
+                                "topic": parsed_message.topic,
+                                "type": parsed_message.type,
+                                "timestamp": parsed_message.timestamp,
+                                "data": parsed_message.data,
+                            },
+                        )
+                    except Exception:
+                        logger.error(
+                            "Failed to dispatch channel points event %s",
+                            event_name,
+                            exc_info=True,
+                        )
 
             for listener in ws.parent_pool.listeners:
                 listener.on_message(parsed_message)
