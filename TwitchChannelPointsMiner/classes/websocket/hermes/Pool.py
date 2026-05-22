@@ -5,6 +5,7 @@ import time
 
 from websocket import WebSocketConnectionClosedException
 
+from TwitchChannelPointsMiner.classes.entities.PubsubTopic import PubsubTopic
 from TwitchChannelPointsMiner.classes.websocket.Pool import WebSocketPool
 from TwitchChannelPointsMiner.classes.websocket.hermes.Client import (
     HermesClient,
@@ -19,6 +20,13 @@ from TwitchChannelPointsMiner.classes.entities.Message import Message
 from TwitchChannelPointsMiner.utils import internet_connection_available
 
 logger = logging.getLogger(__name__)
+
+
+class _ChannelTopicRef:
+    __slots__ = ["channel_id"]
+
+    def __init__(self, channel_id):
+        self.channel_id = str(channel_id)
 
 
 class HermesWebSocketPool(WebSocketPool, HermesWebSocketListener):
@@ -39,6 +47,7 @@ class HermesWebSocketPool(WebSocketPool, HermesWebSocketListener):
         self.clients = []
         self.pubsub_message_listeners = [listener for listener in listeners]
         self.force_close = False
+        self.channel_points_dispatcher = None
         self.__lock = threading.Lock()
 
     def topic(self, subscription_id: str):
@@ -100,6 +109,43 @@ class HermesWebSocketPool(WebSocketPool, HermesWebSocketListener):
                 logger.debug("Already subscribed to topic, %s", topic)
             else:
                 self.__next_available_client().subscribe(topic)
+
+    def unsubscribe(self, topic):
+        topic_key = str(topic)
+        with self.__lock:
+            for client in self.clients:
+                with client.pending_topics_lock:
+                    client.pending_topics = [
+                        pending
+                        for pending in client.pending_topics
+                        if str(pending) != topic_key
+                    ]
+                    subscription_ids = [
+                        subscription_id
+                        for subscription_id, (subscribed_topic, _) in client.subscriptions.items()
+                        if str(subscribed_topic) == topic_key
+                    ]
+                    for subscription_id in subscription_ids:
+                        client.subscriptions.pop(subscription_id, None)
+
+    def subscribe_channel_points_channel(self, channel_id):
+        topic = PubsubTopic(
+            "community-points-channel-v1",
+            streamer=_ChannelTopicRef(channel_id),
+        )
+        self.submit(topic)
+        return str(topic)
+
+    def unsubscribe_channel_points_channel(self, channel_id):
+        topic = PubsubTopic(
+            "community-points-channel-v1",
+            streamer=_ChannelTopicRef(channel_id),
+        )
+        self.unsubscribe(topic)
+        return str(topic)
+
+    def set_channel_points_dispatcher(self, dispatcher):
+        self.channel_points_dispatcher = dispatcher
 
     def __reconnect(self, client: HermesClient):
         with self.__lock:
@@ -189,8 +235,40 @@ class HermesWebSocketPool(WebSocketPool, HermesWebSocketListener):
         client.last_message_timestamp = message.timestamp
         client.last_message_identifier = message.identifier
 
+        self._dispatch_channel_points_message(message)
+
         for listener in self.pubsub_message_listeners:
             listener.on_message(message)
+
+    def _dispatch_channel_points_message(self, message: Message):
+        if self.channel_points_dispatcher is None:
+            return
+
+        event_name = {
+            "reward-redeemed": "reward_redeemed",
+            "custom-reward-updated": "reward_updated",
+            "points-spent": "points_spent",
+        }.get(message.type)
+        if event_name is None:
+            return
+
+        try:
+            self.channel_points_dispatcher(
+                event_name,
+                {
+                    "channel_id": message.channel_id,
+                    "topic": message.topic,
+                    "type": message.type,
+                    "timestamp": message.timestamp,
+                    "data": message.data,
+                },
+            )
+        except Exception:
+            logger.error(
+                "Failed to dispatch channel points event %s",
+                event_name,
+                exc_info=True,
+            )
 
     def on_reconnect(self, client: HermesClient, url: str):
         self.__reconnect(client)

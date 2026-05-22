@@ -2152,7 +2152,10 @@ class Twitch(object):
     # Load the amount of current points for a channel, check if a bonus is available
     def load_channel_points_context(self, streamer):
         json_data = copy.deepcopy(GQLOperations.ChannelPointsContext)
-        json_data["variables"] = {"channelLogin": streamer.username}
+        json_data["variables"] = {
+            **json_data.get("variables", {}),
+            "channelLogin": streamer.username,
+        }
 
         response = self.post_gql_request(json_data)
         if not response or self._log_gql_errors(json_data.get("operationName"), response):
@@ -2263,6 +2266,73 @@ class Twitch(object):
                     if not future.done():
                         failed_streamers.add(streamer.username)
         return failed_streamers
+
+    def get_channel_rewards_context(self, channel_login):
+        json_data = copy.deepcopy(GQLOperations.ChannelPointsContext)
+        json_data["variables"] = {
+            **json_data.get("variables", {}),
+            "channelLogin": channel_login,
+        }
+
+        response = self.post_gql_request(json_data)
+        if response in [{}, None]:
+            return {"channelLogin": channel_login, "error": "empty_response"}
+
+        try:
+            community = response["data"]["community"]
+            if community is None:
+                return {"channelLogin": channel_login, "error": "channel_not_found"}
+
+            channel = community["channel"]
+            community_points = channel["self"]["communityPoints"]
+            settings = channel.get("communityPointsSettings", {})
+
+            return {
+                "channelLogin": channel_login,
+                "channelId": channel["id"],
+                "communityId": community["id"],
+                "balance": community_points.get("balance", 0),
+                "availableClaim": community_points.get("availableClaim"),
+                "activeMultipliers": community_points.get("activeMultipliers", []),
+                "automaticRewards": settings.get("automaticRewards", []),
+                "customRewards": settings.get("customRewards", []),
+                "goalTypes": json_data["variables"].get("includeGoalTypes", []),
+            }
+        except (TypeError, KeyError):
+            return {"channelLogin": channel_login, "error": "invalid_response"}
+
+    def redeem_custom_reward(self, channel_id, reward_payload, transaction_id=None):
+        json_data = copy.deepcopy(GQLOperations.RedeemCustomReward)
+        transaction_id = transaction_id if transaction_id is not None else token_hex(16)
+        json_data["variables"] = {
+            "input": {
+                "channelID": str(channel_id),
+                "cost": int(reward_payload["cost"]),
+                "pricingType": reward_payload.get("pricing_type", "POINTS"),
+                "prompt": reward_payload.get("prompt", ""),
+                "rewardID": reward_payload["reward_id"],
+                "title": reward_payload["title"],
+                "transactionID": transaction_id,
+            }
+        }
+
+        response = self.post_gql_request(json_data)
+        try:
+            payload = response["data"]["redeemCommunityPointsCustomReward"]
+            error = payload.get("error")
+            return {
+                "ok": error is None,
+                "transactionId": transaction_id,
+                "error": error,
+                "raw": payload,
+            }
+        except (TypeError, KeyError):
+            return {
+                "ok": False,
+                "transactionId": transaction_id,
+                "error": "invalid_response",
+                "raw": response,
+            }
 
     def make_predictions(self, event):
         decision = event.bet.calculate(event.streamer.channel_points)
