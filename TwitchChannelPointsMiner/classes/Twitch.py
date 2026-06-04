@@ -64,6 +64,7 @@ logger = logging.getLogger(__name__)
 JsonType = Dict[str, Any]
 STREAMER_INIT_TIMEOUT_PER_STREAMER = 5  # seconds
 STREAM_INFO_CACHE_TTL = 30  # seconds
+RECENT_STREAM_DOWN_ONLINE_BLOCK_SECONDS = 120
 GQL_ERROR_LOG_TTL = 60  # seconds
 GQL_REQUEST_WARNING_TTL = 5 * 60  # seconds
 STREAK_MIN_SECONDS = 5 * 60  # Qualifying watch time before attempting a streak
@@ -455,7 +456,17 @@ class Twitch(object):
         return stream_info
 
     def check_streamer_online(self, streamer, force=False):
-        if force is False and time.time() < streamer.offline_at + 60:
+        now = time.time()
+        recently_went_offline = (
+            streamer.is_online is False
+            and streamer.online_at
+            and streamer.offline_at > streamer.online_at
+            and now < streamer.offline_at + RECENT_STREAM_DOWN_ONLINE_BLOCK_SECONDS
+        )
+        if recently_went_offline:
+            return
+
+        if force is False and now < streamer.offline_at + 60:
             return
 
         if streamer.is_online is False:
