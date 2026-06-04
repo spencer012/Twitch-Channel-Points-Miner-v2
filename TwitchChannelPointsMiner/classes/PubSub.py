@@ -39,8 +39,7 @@ class PubSubHandler(MessageListener):
         if streamer.is_online is True:
             return
 
-        for timer in self.online_detection_timers.pop(streamer.username, []):
-            timer.cancel()
+        self._cancel_online_detection(streamer)
 
         timers = []
         for delay in ONLINE_DETECTION_DELAYS:
@@ -55,11 +54,14 @@ class PubSubHandler(MessageListener):
 
         self.online_detection_timers[streamer.username] = timers
 
+    def _cancel_online_detection(self, streamer):
+        for timer in self.online_detection_timers.pop(streamer.username, []):
+            timer.cancel()
+
     def _run_online_detection_check(self, streamer, delay):
         if self.twitch.running is False or streamer.is_online is True:
             if streamer.is_online is True:
-                for timer in self.online_detection_timers.pop(streamer.username, []):
-                    timer.cancel()
+                self._cancel_online_detection(streamer)
             return
 
         try:
@@ -70,8 +72,7 @@ class PubSubHandler(MessageListener):
             )
         finally:
             if streamer.is_online is True or delay == ONLINE_DETECTION_DELAYS[-1]:
-                for timer in self.online_detection_timers.pop(streamer.username, []):
-                    timer.cancel()
+                self._cancel_online_detection(streamer)
 
     def on_message(self, message: Message):
         streamer_index = get_streamer_index(self.streamers, message.channel_id)
@@ -117,6 +118,7 @@ class PubSubHandler(MessageListener):
                     self.streamers[streamer_index].stream_up = time.time()
                     self._schedule_online_detection(self.streamers[streamer_index])
                 elif message.type == "stream-down":
+                    self._cancel_online_detection(self.streamers[streamer_index])
                     if self.streamers[streamer_index].is_online is True:
                         self.streamers[streamer_index].set_offline()
                 elif message.type == "viewcount":
