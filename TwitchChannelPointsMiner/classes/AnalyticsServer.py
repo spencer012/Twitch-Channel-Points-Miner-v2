@@ -243,6 +243,21 @@ def check_assets():
 
 last_sent_log_index = 0
 
+
+class IngressPathMiddleware:
+    # Home Assistant Ingress serves the app under /api/hassio_ingress/<token>/
+    # and passes that prefix in X-Ingress-Path. Using it as SCRIPT_NAME makes
+    # url_for() build URLs under the prefix; without the header nothing changes.
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        prefix = environ.get("HTTP_X_INGRESS_PATH", "").rstrip("/")
+        if prefix:
+            environ["SCRIPT_NAME"] = prefix
+        return self.wsgi_app(environ, start_response)
+
+
 class AnalyticsServer(Thread):
     def __init__(
         self,
@@ -288,6 +303,7 @@ class AnalyticsServer(Thread):
             template_folder=os.path.join(Path().absolute(), "assets"),
             static_folder=os.path.join(Path().absolute(), "assets"),
         )
+        self.app.wsgi_app = IngressPathMiddleware(self.app.wsgi_app)
         self.app.add_url_rule(
             "/",
             "index",

@@ -113,7 +113,7 @@ $(document).ready(function () {
     // Function to get the full log content
     function getLog() {
         if (isLogCheckboxChecked) {
-            $.get(`/log?lastIndex=${lastReceivedLogIndex}`, function (data) {
+            $.get(`./log?lastIndex=${lastReceivedLogIndex}`, function (data) {
                 // Process and display the new log entries received
                 $("#log-content").append(data);
                 // Scroll to the bottom of the log content
