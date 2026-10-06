@@ -43,6 +43,7 @@ from TwitchChannelPointsMiner.classes.Settings import (
 from TwitchChannelPointsMiner.classes.TwitchLogin import TwitchLogin
 from TwitchChannelPointsMiner.constants import (
     CLIENT_ID,
+    CLIENT_ID_WEB,
     CLIENT_VERSION,
     URL,
     GQLOperations,
@@ -1339,11 +1340,11 @@ class Twitch(object):
             logger.log(level, message, *args)
             self._last_watch_issue_log[key] = now
 
-    def post_gql_request(self, json_data):
+    def post_gql_request(self, json_data, client_id=CLIENT_ID):
         operation_name = self._operation_name_from_json_data(json_data)
         headers = {
             "Authorization": f"OAuth {self.twitch_login.get_auth_token()}",
-            "Client-Id": CLIENT_ID,
+            "Client-Id": client_id,
             # "Client-Integrity": self.post_integrity(),
             "Client-Session-Id": self.client_session,
             "Client-Version": self.update_client_version(),
@@ -1380,7 +1381,7 @@ class Twitch(object):
                         response.status_code,
                     )
             try:
-                return response.json()
+                json_response = response.json()
             except ValueError:
                 key = ("gql_invalid_json", operation_name, response.status_code)
                 now = time.time()
@@ -1399,6 +1400,8 @@ class Twitch(object):
                         response.status_code,
                     )
                 return {}
+
+            query_attr = f"{operation_name}Query"
             is_apq_miss = (
                 isinstance(json_response, dict)
                 and any(
@@ -1409,13 +1412,14 @@ class Twitch(object):
             )
             should_retry_with_full_query = (
                 is_apq_miss
-                and json_data.get("operationName") == "PlaybackAccessToken"
+                and isinstance(json_data, dict)
+                and hasattr(GQLOperations, query_attr)
                 and "query" not in json_data
             )
 
             if should_retry_with_full_query:
                 retry_payload = copy.deepcopy(json_data)
-                retry_payload["query"] = GQLOperations.PlaybackAccessTokenQuery
+                retry_payload["query"] = getattr(GQLOperations, query_attr)
 
                 retry_response = self._request_with_retry(
                     "POST",
@@ -1426,7 +1430,10 @@ class Twitch(object):
                     timeout=20,
                 )
                 logger.debug(
-                    "Retrying PlaybackAccessToken with inline GraphQL query due to PersistedQueryNotFound. "
+                    "Retrying %s with inline GraphQL query due to PersistedQueryNotFound. ",
+                    operation_name,
+                )
+                logger.debug(
                     f"Data: {retry_payload}, Status code: {retry_response.status_code}, Content: {retry_response.text}"
                 )
                 try:
@@ -2227,7 +2234,7 @@ class Twitch(object):
             "channelLogin": streamer.username,
         }
 
-        response = self.post_gql_request(json_data)
+        response = self.post_gql_request(json_data, client_id=CLIENT_ID_WEB)
         if not response or self._log_gql_errors(json_data.get("operationName"), response):
             return
         try:
@@ -2344,7 +2351,7 @@ class Twitch(object):
             "channelLogin": channel_login,
         }
 
-        response = self.post_gql_request(json_data)
+        response = self.post_gql_request(json_data, client_id=CLIENT_ID_WEB)
         if response in [{}, None]:
             return {"channelLogin": channel_login, "error": "empty_response"}
 
@@ -2403,7 +2410,7 @@ class Twitch(object):
             }
         }
 
-        response = self.post_gql_request(json_data)
+        response = self.post_gql_request(json_data, client_id=CLIENT_ID_WEB)
         try:
             payload = response["data"]["redeemCommunityPointsCustomReward"]
             error = payload.get("error")

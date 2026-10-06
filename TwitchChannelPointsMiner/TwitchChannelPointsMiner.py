@@ -73,6 +73,10 @@ logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.getLogger("irc.client").setLevel(logging.ERROR)
 logging.getLogger("seleniumwire").setLevel(logging.ERROR)
 logging.getLogger("websocket").setLevel(logging.ERROR)
+# websockets may try to decode an individual fragmented frame for DEBUG logging.
+# A frame can end midway through a multi-byte UTF-8 character even though the
+# complete websocket text message is valid, causing its logger formatter to fail.
+logging.getLogger("websockets").setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
 REPORT_PERIODS = ("daily", "weekly", "monthly", "yearly")

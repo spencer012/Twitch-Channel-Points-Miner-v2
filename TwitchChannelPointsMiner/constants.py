@@ -314,3 +314,15 @@ query PlaybackAccessToken(
             }
         },
     }
+    RedeemCustomRewardQuery = """
+mutation RedeemCustomReward($input: RedeemCommunityPointsCustomRewardInput!) {
+  redeemCommunityPointsCustomReward(input: $input) {
+    error {
+      code
+      message
+      __typename
+    }
+    __typename
+  }
+}
+""".strip()

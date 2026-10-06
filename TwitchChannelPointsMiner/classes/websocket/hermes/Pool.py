@@ -120,13 +120,15 @@ class HermesWebSocketPool(WebSocketPool, HermesWebSocketListener):
                         for pending in client.pending_topics
                         if str(pending) != topic_key
                     ]
-                    subscription_ids = [
-                        subscription_id
-                        for subscription_id, (subscribed_topic, _) in client.subscriptions.items()
-                        if str(subscribed_topic) == topic_key
-                    ]
-                    for subscription_id in subscription_ids:
-                        client.subscriptions.pop(subscription_id, None)
+                    if any(
+                        str(subscribed_topic) == topic_key
+                        for subscribed_topic, _ in client.subscriptions.values()
+                    ):
+                        logger.debug(
+                            "%s - Keeping Hermes subscription mapping for %s until reconnect",
+                            client.describe(),
+                            topic_key,
+                        )
 
     def subscribe_channel_points_channel(self, channel_id):
         topic = PubsubTopic(
